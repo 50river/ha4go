@@ -1,4 +1,18 @@
 language: ruby
 rvm:
-  - 2.2.4
-# before_install: gem install bundler -v 1.11.2
+  - 2.3.3
+services:
+  - mysql
+
+bundler_args: "--without development --deployment"
+
+cache: bundler
+
+before_script:
+  - mysql -e 'create database myapp_test character set utf8;'
+  - cp config/database.travis.yml config/database.yml
+  - bundle exec rails db:create
+  - bundle exec rails db:migrate
+script:
+  - bundle exec rubocop --fail-level=W
+  - bundle exec rails test

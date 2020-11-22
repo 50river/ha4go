@@ -1,33 +1,47 @@
 # coding: utf-8
 class Project < ActiveRecord::Base
+  attribute :images, ArrayType.new
+  mount_uploaders :images, ImageUploader
+  serialize :images, JSON
   validates :subject, presence: true
   has_many :project_updates
   belongs_to :user
   has_and_belongs_to_many :users
   has_and_belongs_to_many :skills
   belongs_to :stage
+  belongs_to :project
+  has_many   :projects
 
-  scope :recent, lambda { |before|
-    joins(:project_updates).where('project_updates.created_at > ?', before).group(:project_id)
-  }
+  scope :recent, -> { order(last_commented_at: 'desc') }
 
-  scope :recruiting, lambda {
+  scope :recruiting, -> { where.not(stage_id: 13) }
+
+  scope :match_skills, lambda { |skill_ids|
     where.not(stage_id: 13)
+         .includes(:skills)
+         .where(skills: { id: skill_ids })
   }
 
-  scope :match_mine, lambda { |skills|
-    joins(:skills).where(skills: { id: skills }).where.not(stage_id: 13)
-  }
-
-  scope :hot_rank, lambda { |before|
-    keys = joins(:project_updates).where(ProjectUpdate.arel_table[:created_at].gt(before)).group(ProjectUpdate.arel_table[:project_id]).order('count_project_updates_project_id desc').count('project_updates.project_id').keys
-    records = Project.find(keys).index_by(&:id)
-    out = []
-    keys.each do |k|
-      out << records[k]
+  scope :original_order, lambda { |ids|
+    if Array(ids).empty?
+      where(id: [])
+    else
+      where(id: ids).order("field(id, #{ids.join(',')})")
     end
-    out
   }
+
+  def self.comment_ranking(before)
+    Project
+      .joins(:project_updates)
+      .where(
+        project_updates: {
+          created_at: Time.now.ago(30.years)...before
+        }
+      )
+      .group('project_updates.project_id')
+      .order('count_project_updates_project_id desc')
+      .count('project_updates.project_id')
+  end
 
   # プロジェクトを編集可能なユーザーかどうか
   # @param [Integer] user_id
@@ -74,7 +88,28 @@ class Project < ActiveRecord::Base
     if send_users.select { |u| u['user_id'] == me['user_id'] }.empty?
       send_users.push me
     end
+
+    # すべてを受け取るユーザーを追加
+    User.where(receive_all: 1).pluck(:email).compact each do |u|
+      send_users.push u
+    end
     send_users
+  end
+
+  def send_mail_addresses
+    send_targets = users.pluck(:email).compact
+    me = user.email
+
+    # 自分がいない場合には含める
+    if send_targets.include?(me)
+      send_targets.push me
+    end
+
+    # すべてを受け取るユーザーを追加
+    User.where(receive_all: 1).pluck(:email).compact.each do |u|
+      send_targets.push u
+    end
+    send_targets.uniq
   end
 
   def send_mail_skill_matched_users

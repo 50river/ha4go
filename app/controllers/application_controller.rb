@@ -3,7 +3,7 @@ class ApplicationController < ActionController::Base
   # For APIs, you may want to use :null_session instead.
   protect_from_forgery with: :exception
 
-  before_action :authorized?, :check_use_https, :set_quick_link_counts, :save_current_url, :set_rss_url
+  before_action :authorized?, :check_use_https, :set_quick_link_counts, :save_current_url, :set_rss_url, :set_app_information
 
   helper_method :authorized?
 
@@ -14,8 +14,8 @@ class ApplicationController < ActionController::Base
   end
 
   def authorized?
-    @my_user = User.find(session[:user_id]) if session[:user_id]
-    !@my_user.nil?
+    @my_user = User.find_by(id: session[:user_id]) if session[:user_id]
+    @my_user.present?
   end
 
   def check_use_https
@@ -23,11 +23,11 @@ class ApplicationController < ActionController::Base
   end
 
   def set_quick_link_counts
-    @projects_recent_count = Project.recent(default_duration).length
-    @projects_hot_rank_count = Project.hot_rank(default_duration).length
+    @projects_recent_count = Project.recent.length
+    @projects_hot_rank_count = Project.comment_ranking(default_duration).length
     @projects_all_count = Project.all.count
     if authorized?
-      @projects_match = Project.match_mine(@my_user.skills).length
+      @projects_match = Project.match_skills(@my_user.skill_ids).length
     else
       @projects_match = @projects_all_count
     end
@@ -43,6 +43,10 @@ class ApplicationController < ActionController::Base
   end
 
   def set_rss_url
-    @rss_urls = [{ name: 'ha4go Project List', url:  '/feed.rss' }]
+    @rss_urls = [{ name: 'Ha4go Project List', url: '/feed.rss' }]
+  end
+
+  def set_app_information
+    @app_infors = AppInformation.order(release: :desc).limit(10)
   end
 end

@@ -19,3 +19,6 @@
 /.env*
 
 /mysql/*
+
+/public/uploads/*
+db/seeds/*.yml

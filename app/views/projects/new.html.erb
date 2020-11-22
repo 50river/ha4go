@@ -1,8 +1,22 @@
+<%= provide(:title, t('title.projects.new')) %>
+
 <div class="content">
   <% if notice %>
     <div class="alert alert-success" role="alert">
       <%= notice %>
     </div>
   <% end %>
+  <div class="project-detail__define">
+    <% unless @parent_project.nil? %>
+      <div class="row">
+        <div class="col-md-2">
+          <%= t 'dic.parent_project' %>
+        </div>
+        <div class="input_text">
+          <%= @parent_project.subject %>
+        </div>
+      </div>
+    <% end %>
+  </div>
   <%= render 'form' %>
 </div>

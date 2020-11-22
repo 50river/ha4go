@@ -1,4 +1,6 @@
-<%= form_for(@project) do |f| %>
+<%= form_for(@project, html: { multipart: true }) do |f| %>
+  <%= hidden_field_tag :from, @from.to_s %>
+
   <% if @project.errors.any? %>
     <div id="error_explanation">
       <h2><%= pluralize(@project.errors.count, "error") %> prohibited this project from being saved:</h2>
@@ -10,60 +12,121 @@
     </div>
   <% end %>
   <div class="project-detail__define">
+    <!-- タイトル -->
     <div class="row">
+      <% if @parent_project.nil? %>
+      <% else %>
+        <%= f.hidden_field :project_id, value: @parent_project.id %>
+      <% end %>
       <div class="col-md-2">
         <%= t 'dic.title' %>
       </div>
       <div class="input_text">
-        <%= f.text_field :subject %>
+        <%= f.text_field :subject, placeholder: t('dic.ex_subject') %>
       </div>
     </div>
+
+    <!-- URL -->
     <div class="row">
       <div class="col-md-2">
         URL
       </div>
       <div class="input_text">
-        <%= f.url_field :user_url, class: 'form-control' %>
+        <%= f.url_field :user_url, class: 'form-control', placeholder: t('dic.ex_url') %>
       </div>
     </div>
+
+    <!-- 開発URL -->
     <div class="row">
       <div class="col-md-2">
         <%= t '.dev_url' %>
       </div>
       <div class="input_text">
-        <%= f.url_field :development_url, class: 'form-control' %>
+        <p>
+          <%= f.url_field :development_url, class: 'form-control', placeholder: t('dic.ex_devurl') %>
+        </p>
+        <p>
+          <%= t('.recommend_dev_url')%>
+        </p>
       </div>
     </div>
+
+    <!-- 詳細 -->
     <div class="row">
       <div class="col-md-2">
         <%= t 'dic.detail' %>
       </div>
       <div class="input_text">
-          <%= f.text_area :description, class: 'form-control', rows: 5 %>
+        <%= f.text_area :description, class: 'form-control', rows: 5, placeholder: t('dic.ex_description') %>
       </div>
     </div>
+
+    <!-- 画像一覧(編集時には表示しない) -->
+    <% if (params[:action] == 'edit') %>
+      <div class="row">
+        <div class="col-md-2">
+          画像一覧
+        </div>
+        <div class="col-md-2">
+          <% if @project.images.size == 0 %>
+            なし
+          <% else %>
+            <%= f.label "remove_images" do %>
+              <%= f.check_box(:remove_images) + "添付画像を全て削除する" %>
+            <% end %>
+            <% @project.images.each_with_index do |img, index| %>
+              <div class="content_box">
+                <p class="image_all">
+                  <%= image_tag(img.url) %>
+                </p>
+              </div>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <!-- 画像投稿ボタン -->
+    <div class="row">
+      <div class="col-md-2">
+        画像添付
+      </div>
+      <div class="col-md-2">
+        <%= f.file_field :images, multiple: true %>
+      </div>
+    </div>
+
+
+    <!-- 必要なスキル -->
     <div class="row">
       <div class="col-md-2">
         <%= t '.skill'%>
       </div>
       <div class="col-md-2">
+        <p>
         <%= collection_check_boxes(:skill_names, :skill_ids, Skill.all, :name, :name) do |b| %>
           <%= b.label { b.check_box(checked: @my_skills.include?(b.text)) + b.text } %>
         <% end %>
+        </p>
+        <p>
+          <%= t('.recommend_skill')%>
+        </p>
       </div>
     </div>
+
+    <!-- 必要なスキル(まだ作られていない) -->
     <div class="row">
       <div class="col-md-2">
         <%= t '.new_skill'%>
       </div>
       <div class="input_text">
-        <%= text_field :new_skills, :new_skills  %>
+        <%= text_field :new_skills, :new_skills, placeholder: t('dic.ex_skills') %>
       </div>
     </div>
     <% if (params[:action] == 'edit') then %>
       <div class="row">
         <div class="col-md-2">
-          <%= t 'dic.status' %>
+          <%= t 'dic.status' %> <%= link_to t('dic.detail'), ENV['LINK_ABOUT_PROJECT_STATUS'], target: '_blank' %>
         </div>
         <div class="col-md-10">
           <div class="form-inline mt10">
@@ -74,6 +137,7 @@
     <% end %>
   </div>
 
+  <!-- 利用規約確認ボタン -->
   <% if (params[:action] == 'edit') then %>
     <div>
       <button type="submit" class="btn btn-default btn-primary" aria-label="Left Align">
@@ -84,11 +148,11 @@
     <div>
       <label for="agree_message_check">
         <input type="checkbox" id="agree_message_check" name="agreecheck" value="1">
-        当課題の成果物はコードフォーカナザワに帰属いたします。
+        <%= link_to t('dic.user_term'), ENV['LINK_USER_TERMS'], target: '_blank' %><%= t('dic.user_term_check')%>
       </label>
     </div>
     <div>
-      <button type="submit" disabled id="need_agree_button" class="btn btn-default btn-primary" aria-label="Left Align">
+      <button type="submit" disabled id="need_agree_button" class="btn btn-default btn-primary btn2submit" aria-label="Left Align">
         <%= t 'dic.do_create' %>
       </button>
     </div>

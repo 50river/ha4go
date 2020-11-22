@@ -1,32 +1,46 @@
 # coding: utf-8
 class ProjectsController < ApplicationController
-  helper SnsHelper
+  include SnsPublisher
   before_action :set_project, only: [:show, :edit, :update, :destroy, :join, :leave]
 
   # GET /projects
   def index
     type = params[:type]
+    page = params[:page]
+    query = Project.page(page).includes(
+      :project_updates,
+      :user,
+      :project,
+      :projects,
+      :users,
+      :skills,
+      :stage
+    )
     if type == 'recent'
-      @projects = Project.recent(default_duration)
+      @list_type = I18n.t('dic.project_recent')
+      @projects = query.order(last_commented_at: :desc)
     elsif type == 'hotrank'
-      @projects = Project.hot_rank(default_duration)
+      @list_type = I18n.t('dic.project_hot')
+      rank = Project.comment_ranking(default_duration)
+      @projects = query.original_order(rank.keys)
     elsif type == 'match'
+      @projects = []
       unless @my_user.nil?
-        @projects = Project.match_mine(@my_user.skills)
+        @list_type = I18n.t('dic.project_match_mine')
+        @projects = query.match_skills(@my_user.skill_ids)
       end
-      @projets = []
     else
-      @projects = Project.all
+      @list_type = I18n.t('dic.project_all')
+      @projects = query.order(:id)
     end
-
   end
 
   # GET /projects/1
   def show
-    @use_custom_ogp = true
-    add_rss_urls(@project.subject, request.fullpath + '.rss')
+    @project_rss_url = request.fullpath + '.rss'
+    add_rss_urls(@project.subject, @project_rss_url)
     respond_to do |format|
-      format.any
+      format.html
       format.rss { render layout: false }
     end
   end
@@ -37,6 +51,9 @@ class ProjectsController < ApplicationController
     @skills    = Skill.all
     @users     = User.all
     @my_skills = []
+    @parent_project = nil
+    @parent_project = Project.find(params[:parent_id]) unless params[:parent_id].nil?
+    @from = params[:from]
   end
 
   # GET /projects/1/edit
@@ -49,22 +66,32 @@ class ProjectsController < ApplicationController
   def create
     @project = Project.new(project_params)
     @project.user_id = @my_user.id
-    skills = Array(params[:skill_names][:skill_ids]) + params[:new_skills][:new_skills].split(' ')
+    @project.last_commented_at = Time.now
+    skills = Array(params.dig(:skill_names, :skill_ids)) + params.dig(:new_skills, :new_skills).split(' ')
     @project.update_skill_ids_by_skill_names(skills) unless skills.empty?
 
-    if @project.save
+    # 作成時自分を参加させる
+    @project.users.push(@my_user)
 
+    if @project.save
       # mail to created
-      @project.send_mail_users.pluck(:email).compact.each do |m|
-        ProjectMailer.tell_create(m, @project).deliver_now unless m == ''
+      @project.send_mail_addresses.each do |m|
+        ProjectMailer.tell_create(m, @project).deliver_later unless m == ''
       end
+
+      project_publish_to_sns_page(
+        "#{@my_user.name} さんが課題 #{@project.subject} を作成しました。",
+        @project,
+        @my_user
+      )
 
       # mail to skill matched
       User.joins(:skills).where(skills: { id: @project.skills }).pluck(:email).compact.each do |m|
-        ProjectMailer.tell_skill_match(m, @project, true).deliver_now unless m == ''
+        ProjectMailer.tell_skill_match(m, @project, true).deliver_later unless m == ''
       end
 
-      redirect_to @project, notice: I18n.t('projects.banner.created')
+      redirect_target = params[:from].nil? ? @project : '/dashboard'
+      redirect_to redirect_target, notice: I18n.t('projects.banner.created')
     else
       render :new
     end
@@ -72,17 +99,40 @@ class ProjectsController < ApplicationController
 
   # PATCH/PUT /projects/1
   def update
+    param_cache = project_params
+    unless param_cache[:images].nil?
+      images = @project.images
+      images += param_cache[:images]
+      param_cache[:images] = images
+    end
     before_skills = @project.skills.map(&:id)
-    if @project.update(project_params)
-      skills = Array(params[:skill_names][:skill_ids]) + params[:new_skills][:new_skills].split(' ')
+    if @project.update(param_cache)
+
+      if params[:project][:remove_images].to_i > 0
+        remain_images = @project.images
+        remain_images.each_with_index do |_v, i|
+          _deleted_image = remain_images.delete_at(i)
+          # _deleted_image.try(:remove!)
+        end
+        @project.images = remain_images
+        @project.update!(images: remain_images)
+      end
+
+      skills = Array(params.dig(:skill_names, :skill_ids)) + params.dig(:new_skills, :new_skills).split(' ')
       @project.update_skill_ids_by_skill_names(skills) unless skills.empty?
 
       current_skills = @project.skills.map(&:id)
       fue = current_skills - before_skills
 
+      project_publish_to_sns_page(
+        "#{@my_user.name} さんが課題 #{@project.subject} を更新しました。",
+        @project,
+        @my_user
+      )
+
       # mail to skill matched
       User.joins(:skills).where(skills: { id: fue }).pluck(:email).compact.each do |m|
-        ProjectMailer.tell_skill_match(m, @project).deliver_now unless m == ''
+        ProjectMailer.tell_skill_match(m, @project).deliver_later unless m == ''
       end
 
       redirect_to @project, notice: I18n.t('projects.banner.updated')
@@ -115,6 +165,7 @@ class ProjectsController < ApplicationController
         ProjectUpdate.new(
           project_id:  @project.id,
           description: "#{@my_user.name} さんは課題 #{@project.subject} への参加を辞めました。",
+          freezing:    true,
           user_id:     @my_user.id
         ).save
 
@@ -135,7 +186,17 @@ class ProjectsController < ApplicationController
 
   # Use callbacks to share common setup or constraints between actions.
   def set_project
-    @project  = Project.find(params[:id])
+    include_target = [
+      { project_updates: { project_update_histories: :user } },
+      :user,
+      :project,
+      :projects,
+      :users,
+      :skills,
+      :stage
+    ]
+    @project = Project.includes(*include_target)
+                      .find(params[:id])
     @skills   = Skill.all
     @joinners = Project.find(params[:id]).users
     @my_skills = @project.skills.all.map { |k| k[:name] }
@@ -144,11 +205,10 @@ class ProjectsController < ApplicationController
     else
       @joined = false
     end
-    @use_custom_ogp = false
   end
 
   # Never trust parameters from the scary internet, only allow the white list through.
   def project_params
-    params.require(:project).permit(:user_id, :stage_id, :subject, :description, :user_url, :development_url)
+    params.require(:project).permit(:user_id, :stage_id, :subject, :description, :user_url, :development_url, :project_id, { images: [] }, :remove_images)
   end
 end
